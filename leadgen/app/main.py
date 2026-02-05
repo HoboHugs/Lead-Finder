@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -56,7 +56,7 @@ def index():
 
 
 @app.post("/api/leads")
-def leads(req: LeadRequest, _: None = require_api_key()):
+def leads(req: LeadRequest, _: None = Depends(require_api_key)):
     results = run_contacts(
         req.companies_text,
         sleep_between=req.sleep_between,
@@ -67,7 +67,7 @@ def leads(req: LeadRequest, _: None = require_api_key()):
 
 
 @app.post("/api/leads.csv", response_class=PlainTextResponse)
-def leads_csv(req: LeadRequest, _: None = require_api_key()):
+def leads_csv(req: LeadRequest, _: None = Depends(require_api_key)):
     results = run_contacts(
         req.companies_text,
         sleep_between=req.sleep_between,
