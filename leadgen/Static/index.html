@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lead Finder</title>
+  <style>
+    :root { --bg:#0b0f14; --card:#121826; --text:#e6edf3; --muted:#9aa4b2; --accent:#4ea1ff; --border:#223045; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background: var(--bg); color: var(--text); }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 28px 18px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    p { margin: 0 0 14px; color: var(--muted); }
+    textarea { width: 100%; min-height: 180px; resize: vertical; border-radius: 12px; border: 1px solid var(--border); background: #0d1320; color: var(--text); padding: 12px; font-size: 14px; line-height: 1.4; }
+    .row { display:flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+    label { color: var(--muted); font-size: 13px; }
+    input { width: 92px; border-radius: 10px; border: 1px solid var(--border); background: #0d1320; color: var(--text); padding: 8px 10px; }
+    button { border: 0; border-radius: 12px; padding: 10px 14px; background: var(--accent); color: #00111f; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+    th, td { border-top: 1px solid var(--border); padding: 10px 8px; vertical-align: top; font-size: 13px; }
+    th { text-align: left; color: var(--muted); font-weight: 600; }
+    a { color: var(--accent); text-decoration: none; }
+    .small { font-size: 12px; color: var(--muted); }
+    .status { margin-left: auto; color: var(--muted); font-size: 13px; }
+    .pill { display:inline-block; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Lead Finder</h1>
+      <p>Paste company names (one per line). This tool will try to find the company website and scrape public contact info.</p>
+
+      <textarea id="companies" placeholder="Acme Corp&#10;Globex&#10;Initech"></textarea>
+
+      <div class="row">
+        <label>Sleep between companies (s)
+          <input id="sleep_between" type="number" step="0.1" min="0" max="5" value="0.5" />
+        </label>
+        <label>Delay per page (s)
+          <input id="per_page_delay_s" type="number" step="0.05" min="0" max="2" value="0.2" />
+        </label>
+        <label>Max companies
+          <input id="max_companies" type="number" step="1" min="1" max="200" value="50" />
+        </label>
+
+        <button id="run">Find contacts</button>
+        <button id="download" disabled>Download CSV</button>
+        <div class="status" id="status">Idle</div>
+      </div>
+
+      <div class="small" style="margin-top:10px;">
+        Tip: For best results, use exact legal names. Respect websites' terms of service.
+      </div>
+
+      <div id="results"></div>
+    </div>
+  </div>
+
+<script>
+  const el = (id) => document.getElementById(id);
+  let lastPayload = null;
+
+  function renderTable(results) {
+    const rows = results.map(r => {
+      const emails = (r.emails || []).map(e => `<div>${escapeHtml(e)}</div>`).join('') || '<span class="pill">none</span>';
+      const phones = (r.phones || []).map(p => `<div>${escapeHtml(p)}</div>`).join('') || '<span class="pill">none</span>';
+      const site = r.website ? `<a href="${escapeAttr(r.website)}" target="_blank" rel="noreferrer">${escapeHtml(r.website)}</a>` : '<span class="pill">not found</span>';
+      return `
+        <tr>
+          <td>${escapeHtml(r.company || '')}</td>
+          <td>${site}</td>
+          <td>${emails}</td>
+          <td>${phones}</td>
+          <td><span class="pill">${escapeHtml(r.status || '')}</span></td>
+        </tr>`;
+    }).join('');
+
+    return `
+      <table>
+        <thead>
+          <tr>
+            <th style="width:24%">Company</th>
+            <th style="width:22%">Website</th>
+            <th style="width:22%">Emails</th>
+            <th style="width:18%">Phones</th>
+            <th style="width:14%">Status</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function escapeAttr(s){
+    return escapeHtml(s).replace(/\s/g, encodeURIComponent);
+  }
+
+  async function run() {
+    const companies_text = el('companies').value.trim();
+    if (!companies_text) return;
+
+    const payload = {
+      companies_text,
+      sleep_between: parseFloat(el('sleep_between').value || '0.5'),
+      per_page_delay_s: parseFloat(el('per_page_delay_s').value || '0.2'),
+      max_companies: parseInt(el('max_companies').value || '50', 10),
+    };
+    lastPayload = payload;
+
+    el('run').disabled = true;
+    el('download').disabled = true;
+    el('status').textContent = 'Running... (this can take a while)';
+    el('results').innerHTML = '';
+
+    try {
+      const res = await fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      el('status').textContent = `Done: ${data.count} companies`;
+      el('results').innerHTML = renderTable(data.results || []);
+      el('download').disabled = false;
+    } catch (e) {
+      el('status').textContent = 'Error: ' + (e.message || e);
+    } finally {
+      el('run').disabled = false;
+    }
+  }
+
+  async function downloadCsv() {
+    if (!lastPayload) return;
+    el('download').disabled = true;
+    el('status').textContent = 'Preparing CSV...';
+
+    try {
+      const res = await fetch('/api/leads.csv', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(lastPayload)
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const csv = await res.text();
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'leads.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      el('status').textContent = 'CSV downloaded';
+    } catch (e) {
+      el('status').textContent = 'CSV error: ' + (e.message || e);
+    } finally {
+      el('download').disabled = false;
+    }
+  }
+
+  el('run').addEventListener('click', run);
+  el('download').addEventListener('click', downloadCsv);
+</script>
+</body>
+</html>
