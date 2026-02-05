@@ -45,6 +45,10 @@
           <input id="max_companies" type="number" step="1" min="1" max="200" value="50" />
         </label>
 
+        <label>Access key
+          <input id="api_key" type="password" placeholder="required" style="width:180px" />
+        </label>
+
         <button id="run">Find contacts</button>
         <button id="download" disabled>Download CSV</button>
         <div class="status" id="status">Idle</div>
@@ -99,9 +103,22 @@
     return escapeHtml(s).replace(/\s/g, encodeURIComponent);
   }
 
+  // Persist access key locally (simple invite-only gate)
+  const KEY_STORAGE = 'leadfinder_api_key';
+  el('api_key').value = localStorage.getItem(KEY_STORAGE) || '';
+  el('api_key').addEventListener('input', () => {
+    localStorage.setItem(KEY_STORAGE, el('api_key').value || '');
+  });
+
   async function run() {
     const companies_text = el('companies').value.trim();
     if (!companies_text) return;
+
+    const apiKey = (el('api_key').value || '').trim();
+    if (!apiKey) {
+      el('status').textContent = 'Enter access key first';
+      return;
+    }
 
     const payload = {
       companies_text,
@@ -119,7 +136,7 @@
     try {
       const res = await fetch('/api/leads', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
         body: JSON.stringify(payload)
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -136,13 +153,20 @@
 
   async function downloadCsv() {
     if (!lastPayload) return;
+
+    const apiKey = (el('api_key').value || '').trim();
+    if (!apiKey) {
+      el('status').textContent = 'Enter access key first';
+      return;
+    }
+
     el('download').disabled = true;
     el('status').textContent = 'Preparing CSV...';
 
     try {
       const res = await fetch('/api/leads.csv', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
         body: JSON.stringify(lastPayload)
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

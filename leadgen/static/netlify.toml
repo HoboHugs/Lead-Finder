@@ -1,0 +1,9 @@
+# Netlify config for the Lead Finder frontend (static site)
+
+# Proxy API requests to the backend so the browser can keep using same-origin '/api/*'
+# without dealing with CORS.
+[[redirects]]
+  from = "/api/*"
+  to = "https://RENDER_BACKEND_HOST/api/:splat"
+  status = 200
+  force = true

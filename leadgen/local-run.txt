@@ -7,4 +7,5 @@ http://localhost:8000
 
 http://127.0.0.1:18789/
 
-API: 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
+# API keys/secrets should be set as environment variables on the host (Render, etc.)
+# and never committed to the repo.

@@ -1,15 +1,45 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .scraper import run_contacts, results_to_csv_text
 
+import os
+
 app = FastAPI(title="Lead Gen Scraper", version="0.1.0")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    """Shared-secret auth for the public API.
+
+    Supports either:
+      - API_KEY: a single key
+      - API_KEYS: comma-separated list of keys (use this for per-person keys)
+
+    Clients must send header: X-API-Key: <value>
+
+    If neither API_KEY nor API_KEYS is set, auth is disabled.
+    """
+
+    single = (os.getenv("API_KEY") or "").strip()
+    multi_raw = (os.getenv("API_KEYS") or "").strip()
+
+    allowed: set[str] = set()
+    if single:
+        allowed.add(single)
+    if multi_raw:
+        allowed.update({k.strip() for k in multi_raw.split(",") if k.strip()})
+
+    if not allowed:
+        return
+
+    if not x_api_key or x_api_key.strip() not in allowed:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 class LeadRequest(BaseModel):
@@ -26,7 +56,7 @@ def index():
 
 
 @app.post("/api/leads")
-def leads(req: LeadRequest):
+def leads(req: LeadRequest, _: None = require_api_key()):
     results = run_contacts(
         req.companies_text,
         sleep_between=req.sleep_between,
@@ -37,7 +67,7 @@ def leads(req: LeadRequest):
 
 
 @app.post("/api/leads.csv", response_class=PlainTextResponse)
-def leads_csv(req: LeadRequest):
+def leads_csv(req: LeadRequest, _: None = require_api_key()):
     results = run_contacts(
         req.companies_text,
         sleep_between=req.sleep_between,
