@@ -4,6 +4,6 @@
 # without dealing with CORS.
 [[redirects]]
   from = "/api/*"
-  to = "https://RENDER_BACKEND_HOST/api/:splat"
+  to = "https://lead-finder-whex.onrender.com/api/:splat"
   status = 200
   force = true
