@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Florida Company Finder</title>
+  <style>
+    :root { --bg:#0b0f14; --card:#121826; --text:#e6edf3; --muted:#9aa4b2; --accent:#4ea1ff; --border:#223045; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background: var(--bg); color: var(--text); }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 28px 18px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    p { margin: 0 0 14px; color: var(--muted); }
+
+    .topbar { display:flex; align-items:center; gap: 12px; flex-wrap: wrap; }
+    .topbar a { color: var(--accent); text-decoration:none; font-weight: 600; }
+
+    .grid { display:grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+    @media (max-width: 980px){ .grid{ grid-template-columns: repeat(2, minmax(0,1fr)); } }
+
+    label { color: var(--muted); font-size: 13px; display:block; }
+    input, select { width: 100%; border-radius: 10px; border: 1px solid var(--border); background: #0d1320; color: var(--text); padding: 9px 10px; }
+
+    .row { display:flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+    button { border: 0; border-radius: 12px; padding: 10px 14px; background: var(--accent); color: #00111f; font-weight: 700; cursor: pointer; }
+    button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+
+    table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+    th, td { border-top: 1px solid var(--border); padding: 10px 8px; vertical-align: top; font-size: 13px; }
+    th { text-align: left; color: var(--muted); font-weight: 600; }
+    .pill { display:inline-block; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 12px; }
+    .status { margin-left: auto; color: var(--muted); font-size: 13px; }
+    .small { font-size: 12px; color: var(--muted); }
+
+    .warn { background: rgba(255,180,0,0.08); border: 1px solid rgba(255,180,0,0.25); padding: 10px 12px; border-radius: 12px; color: #ffd18a; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="topbar">
+        <div style="flex:1">
+          <h1>Florida Company Finder</h1>
+          <p>Filter companies from the 2011–2025 categorized CSV dataset.</p>
+        </div>
+        <a href="/">← Lead scraper</a>
+      </div>
+
+      <div id="datasetWarn" class="warn" style="display:none"></div>
+
+      <div class="grid" style="margin-top: 12px;">
+        <div>
+          <label>Year</label>
+          <select id="year"></select>
+        </div>
+        <div>
+          <label>Category</label>
+          <select id="category"></select>
+        </div>
+        <div>
+          <label>City (exact)</label>
+          <input id="city" placeholder="TAMPA" />
+        </div>
+        <div>
+          <label>Zipcode (exact)</label>
+          <input id="zipcode" placeholder="33605" />
+        </div>
+        <div>
+          <label>Entity code (exact)</label>
+          <input id="entity_code" placeholder="AFLAL" />
+        </div>
+        <div>
+          <label>Search text</label>
+          <input id="q" placeholder="roofing / consulting / last name..." />
+        </div>
+      </div>
+
+      <div class="row">
+        <label>Access key
+          <input id="api_key" type="password" placeholder="required" style="width:180px" />
+        </label>
+
+        <button id="search">Search</button>
+        <button id="export" class="secondary" disabled>Export CSV (max 5k)</button>
+
+        <div class="status" id="status">Idle</div>
+      </div>
+
+      <div class="row small">
+        <span class="pill">Tip</span>
+        <span>City/category filters are exact-match. Use Search text for partial matches.</span>
+      </div>
+
+      <div id="results"></div>
+
+      <div class="row" id="pager" style="display:none; margin-top: 10px;">
+        <button id="prev" class="secondary">Prev</button>
+        <button id="next" class="secondary">Next</button>
+        <div class="status" id="pageStatus"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const el = (id) => document.getElementById(id);
+  const KEY_STORAGE = 'leadfinder_api_key';
+  el('api_key').value = localStorage.getItem(KEY_STORAGE) || '';
+  el('api_key').addEventListener('input', () => localStorage.setItem(KEY_STORAGE, el('api_key').value || ''));
+
+  let offset = 0;
+  const limit = 50;
+  let lastHasMore = false;
+
+  function escapeHtml(s){
+    return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function getApiKey(){
+    return (el('api_key').value || '').trim();
+  }
+
+  function getFilters(){
+    const year = el('year').value;
+    const category = el('category').value;
+    return {
+      year: year === '__ALL__' ? '' : year,
+      category: category === '__ALL__' ? '' : category,
+      city: el('city').value.trim(),
+      zipcode: el('zipcode').value.trim(),
+      entity_code: el('entity_code').value.trim(),
+      q: el('q').value.trim(),
+      limit,
+      offset,
+    };
+  }
+
+  function renderTable(results){
+    const rows = results.map(r => `
+      <tr>
+        <td>${escapeHtml(r.company_name)}</td>
+        <td><span class="pill">${escapeHtml(r.year)}</span></td>
+        <td>${escapeHtml(r.category || '')}</td>
+        <td>${escapeHtml(r.city || '')}</td>
+        <td>${escapeHtml(r.zipcode || '')}</td>
+        <td>${escapeHtml(r.entity_code || '')}</td>
+        <td class="small">${escapeHtml(r.address || '')}</td>
+      </tr>
+    `).join('');
+
+    return `
+      <table>
+        <thead>
+          <tr>
+            <th style="width:30%">Company</th>
+            <th style="width:8%">Year</th>
+            <th style="width:16%">Category</th>
+            <th style="width:12%">City</th>
+            <th style="width:10%">Zip</th>
+            <th style="width:10%">Entity</th>
+            <th style="width:14%">Address</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
+  async function loadFilters(){
+    const apiKey = getApiKey();
+    if (!apiKey) return;
+
+    try {
+      const res = await fetch('/api/companies/filters', { headers: { 'X-API-Key': apiKey } });
+      const data = await res.json();
+
+      if (!data.dataset_ok){
+        el('datasetWarn').style.display = 'block';
+        el('datasetWarn').textContent = data.message || 'Dataset not found on server.';
+      }
+
+      // years
+      el('year').innerHTML = '<option value="__ALL__">All years</option>' +
+        (data.years || []).map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join('');
+
+      // categories
+      el('category').innerHTML = '<option value="__ALL__">All categories</option>' +
+        (data.categories || []).map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  async function doSearch(){
+    const apiKey = getApiKey();
+    if (!apiKey){
+      el('status').textContent = 'Enter access key first';
+      return;
+    }
+
+    el('search').disabled = true;
+    el('export').disabled = true;
+    el('status').textContent = 'Searching...';
+    el('results').innerHTML = '';
+
+    try {
+      const params = new URLSearchParams(getFilters());
+      const res = await fetch('/api/companies/search?' + params.toString(), { headers: { 'X-API-Key': apiKey } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      lastHasMore = !!data.has_more;
+      const results = data.results || [];
+      el('results').innerHTML = results.length ? renderTable(results) : '<div class="small" style="margin-top:12px;"><span class="pill">No results</span></div>';
+      el('status').textContent = `Showing ${results.length} (offset ${offset})`;
+
+      el('pager').style.display = 'flex';
+      el('prev').disabled = offset === 0;
+      el('next').disabled = !lastHasMore;
+      el('pageStatus').textContent = lastHasMore ? 'More results available' : 'End';
+
+      el('export').disabled = false;
+    } catch (e) {
+      el('status').textContent = 'Error: ' + (e.message || e);
+    } finally {
+      el('search').disabled = false;
+    }
+  }
+
+  async function exportCsv(){
+    const apiKey = getApiKey();
+    if (!apiKey) return;
+
+    el('export').disabled = true;
+    el('status').textContent = 'Preparing CSV export...';
+
+    try {
+      const params = new URLSearchParams({ ...getFilters(), offset: 0, limit: 0 });
+      const res = await fetch('/api/companies/export?' + params.toString(), { headers: { 'X-API-Key': apiKey } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const csv = await res.text();
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'florida_companies_export.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      el('status').textContent = 'CSV downloaded';
+    } catch (e) {
+      el('status').textContent = 'Export error: ' + (e.message || e);
+    } finally {
+      el('export').disabled = false;
+    }
+  }
+
+  el('search').addEventListener('click', () => { offset = 0; doSearch(); });
+  el('export').addEventListener('click', exportCsv);
+  el('prev').addEventListener('click', () => { offset = Math.max(0, offset - limit); doSearch(); });
+  el('next').addEventListener('click', () => { if (lastHasMore) { offset += limit; doSearch(); } });
+
+  // When key is already saved, load available years/categories.
+  loadFilters();
+  el('api_key').addEventListener('change', loadFilters);
+</script>
+</body>
+</html>
