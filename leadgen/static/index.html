@@ -67,6 +67,31 @@
   const el = (id) => document.getElementById(id);
   let lastPayload = null;
 
+  // Import selected companies from the Florida Company Finder
+  const SELECTED_STORAGE = 'leadfinder_selected_companies';
+  (function importSelectedIfPresent(){
+    try {
+      const url = new URL(window.location.href);
+      const shouldImport = url.searchParams.get('import_selected') === '1';
+      const selected = JSON.parse(localStorage.getItem(SELECTED_STORAGE) || '[]');
+      if (!shouldImport || !Array.isArray(selected) || selected.length === 0) return;
+
+      const unique = Array.from(new Set(selected.map(s => String(s||'').trim()).filter(Boolean)));
+      const existing = el('companies').value.trim();
+      const next = existing ? (existing + '\n' + unique.join('\n')) : unique.join('\n');
+      el('companies').value = next;
+
+      // Optional: clear selection after import
+      localStorage.removeItem(SELECTED_STORAGE);
+
+      // Clean URL
+      url.searchParams.delete('import_selected');
+      window.history.replaceState({}, '', url.toString());
+
+      el('status').textContent = `Imported ${unique.length} selected companies`;
+    } catch (_) {}
+  })();
+
   function renderTable(results) {
     const rows = results.map(r => {
       const emails = (r.emails || []).map(e => `<div>${escapeHtml(e)}</div>`).join('') || '<span class="pill">none</span>';

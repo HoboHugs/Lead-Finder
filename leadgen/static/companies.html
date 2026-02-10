@@ -84,6 +84,9 @@
         <button id="search">Search</button>
         <button id="export" class="secondary" disabled>Export CSV (max 5k)</button>
 
+        <button id="addSelected" class="secondary" disabled>Add selected → Lead Finder</button>
+        <button id="clearSelected" class="secondary" disabled>Clear selected</button>
+
         <div class="status" id="status">Idle</div>
       </div>
 
@@ -108,9 +111,20 @@
   el('api_key').value = localStorage.getItem(KEY_STORAGE) || '';
   el('api_key').addEventListener('input', () => localStorage.setItem(KEY_STORAGE, el('api_key').value || ''));
 
+  const SELECTED_STORAGE = 'leadfinder_selected_companies';
+  let selected = new Set(JSON.parse(localStorage.getItem(SELECTED_STORAGE) || '[]'));
+
   let offset = 0;
   const limit = 50;
   let lastHasMore = false;
+
+  function persistSelected(){
+    localStorage.setItem(SELECTED_STORAGE, JSON.stringify(Array.from(selected)));
+    const n = selected.size;
+    el('addSelected').disabled = n === 0;
+    el('clearSelected').disabled = n === 0;
+    el('addSelected').textContent = n === 0 ? 'Add selected → Lead Finder' : `Add selected (${n}) → Lead Finder`;
+  }
 
   function escapeHtml(s){
     return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -136,9 +150,17 @@
   }
 
   function renderTable(results){
-    const rows = results.map(r => `
+    const rows = results.map(r => {
+      const name = String(r.company_name || '').trim();
+      const checked = selected.has(name) ? 'checked' : '';
+      return `
       <tr>
-        <td>${escapeHtml(r.company_name)}</td>
+        <td>
+          <label style="display:flex; gap:8px; align-items:flex-start; cursor:pointer;">
+            <input type="checkbox" class="pick" data-name="${escapeHtml(name)}" ${checked} />
+            <span>${escapeHtml(name)}</span>
+          </label>
+        </td>
         <td><span class="pill">${escapeHtml(r.year)}</span></td>
         <td>${escapeHtml(r.category || '')}</td>
         <td>${escapeHtml(r.city || '')}</td>
@@ -146,13 +168,14 @@
         <td>${escapeHtml(r.entity_code || '')}</td>
         <td class="small">${escapeHtml(r.address || '')}</td>
       </tr>
-    `).join('');
+      `;
+    }).join('');
 
     return `
       <table>
         <thead>
           <tr>
-            <th style="width:30%">Company</th>
+            <th style="width:30%">Pick / Company</th>
             <th style="width:8%">Year</th>
             <th style="width:16%">Category</th>
             <th style="width:12%">City</th>
@@ -220,6 +243,18 @@
       el('pageStatus').textContent = lastHasMore ? 'More results available' : 'End';
 
       el('export').disabled = false;
+      persistSelected();
+
+      // Wire checkbox handlers (table is re-rendered each search)
+      document.querySelectorAll('input.pick').forEach(cb => {
+        cb.addEventListener('change', (ev) => {
+          const name = (ev.target.getAttribute('data-name') || '').trim();
+          if (!name) return;
+          if (ev.target.checked) selected.add(name);
+          else selected.delete(name);
+          persistSelected();
+        });
+      });
     } catch (e) {
       el('status').textContent = 'Error: ' + (e.message || e);
     } finally {
@@ -260,6 +295,23 @@
   el('export').addEventListener('click', exportCsv);
   el('prev').addEventListener('click', () => { offset = Math.max(0, offset - limit); doSearch(); });
   el('next').addEventListener('click', () => { if (lastHasMore) { offset += limit; doSearch(); } });
+
+  function goToLeadFinderWithSelected(){
+    // Persist and navigate; index page will import from localStorage.
+    persistSelected();
+    window.location.href = '/?import_selected=1';
+  }
+
+  el('addSelected').addEventListener('click', goToLeadFinderWithSelected);
+  el('clearSelected').addEventListener('click', () => {
+    selected = new Set();
+    persistSelected();
+    // Re-render current table checkmarks if present
+    document.querySelectorAll('input.pick').forEach(cb => cb.checked = false);
+  });
+
+  // Initialize buttons
+  persistSelected();
 
   // When key is already saved, load available years/categories.
   loadFilters();
